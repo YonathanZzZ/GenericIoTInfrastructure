@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generic IoT Infrastructure</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px 0 0;
+            display: flex;
+            justify-content: space-evenly;
+            align-items: flex-start;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+
+        form {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        form label {
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        form input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 16px;
+            box-sizing: border-box;
+        }
+
+        form button {
+            background-color: #4caf50;
+            color: #fff;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+        }
+        
+        form textarea{
+			width: 100%;
+			margin-bottom: 16px;
+		}
+    </style>
+</head>
+<body>
+
+    <form id="registerCompanyForm">
+        <h2>Register Company</h2>
+        <label for="Company Name">Company Name:</label>
+        <input type="text" id="Company Name" name="companyName" maxlength="38" oninput="removeWhitespace(this)" placeholder="Company Name" required>
+
+        <label for="Company Address">Company Address:</label>
+        <input type="text" id="Company Address" name="companyAddress" maxlength="255" placeholder="Company Address" required>
+
+        <label for="Contact Name">Contact Name:</label>
+        <input type="text" id="contactName" name="contactName" maxlength="255" placeholder="Contact Name" required>
+
+        <label for="Contact Phone">Contact Phone:</label>
+        <input type="number" id="contactPhone" name="contactPhone" oninput="limitInputLength(event, 9);" placeholder="Contact Phone" required>
+
+        <label for="Contact Email">Contact Email:</label>
+        <input type="email" id="contactEmail" name="contactEmail" maxlength="255" placeholder="Contact Email" required>
+
+        <label for="Card Number">Card Number:</label>
+        <input type="number" id="cardNumber" oninput="limitInputLength(event, 16);"  name="cardNumber" required>
+
+        <label for="Card Holder">Card Holder:</label>
+        <input type="text" id="cardHolder" name="cardHolder" maxlength="255" placeholder="Card Holder" required>
+
+        <label for="Expiration Date">Expiration Date:</label>
+        <input type="text" id="expirationDate" name="expirationDate" placeholder="MM/YY" required>
+
+        <label for="CVV">CVV:</label>
+        <input type="number" id="cvv" name="cvv" pattern="/^-?\d+\.?\d*$/" oninput="limitInputLength(event, 3);" placeholder="123" required/>
+
+        <button type="button" onclick="sendRegisterRequest('registerCompanyForm', '/companies')">Submit</button>
+    </form>
+
+    <form id="registerProductForm">
+        <h2>Register Product</h2>
+        <label for="companyNameProduct">Company Name:</label>
+        <input type="text" id="companyNameProduct" name="companyName" placeholder="Company Name" required>
+
+        <label for="productName">Product Name:</label>
+        <input type="text" id="productName" name="productName" placeholder="Product Name" required>
+
+        <label for="productDescription">Product Description:</label>
+        <textarea id="productDescription" name="productDescription" rows="8" placeholder="Product Description" required></textarea>
+
+        <button type="button" onclick="sendRegisterRequest('registerProductForm', '/products')">Submit</button>
+    </form>
+    
+    <script>
+		function sendRegisterRequest(form, resource){
+			//get form data
+			var formData = new FormData(document.getElementById(form));
+			
+			//convert FormData to object
+			var formDataObject = {};
+			formData.forEach(function (value, key) {
+				formDataObject[key] = value;
+			});
+			
+			//send HTTP POST request
+			fetch(resource, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(formDataObject)
+			})
+			.then(response => response.json())
+			.then(data => {
+				//handle server response.
+				alert(data.message);
+			})
+			.catch(error => {
+				console.error('Failed to register company', error);
+			})
+		}
+		
+		function removeWhitespace(input){
+			input.value = input.value.replace(/\s/g, '');
+		}
+		
+		function limitInputLength(event, maxLength) {
+		  if (event.target.value.length > maxLength) {
+		    event.target.value = event.target.value.slice(0, maxLength);
+		  }
+		}
+		
+	</script>
+
+</body>
+</html>
