@@ -1,4 +1,4 @@
-package threadpool;
+
 
 import com.sun.istack.internal.NotNull;
 import waitablequeue.SemWaitableQueue;
@@ -7,24 +7,27 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ThreadPool implements Executor {
-    //private int numOfThreads;
-    private final AtomicInteger atomicNumOfThreads;
+    private final AtomicInteger currNumOfThreads;
+    private int targetNumOfThreads;
     private final SemWaitableQueue<Task<?>> tasks;
     private final Semaphore pauseSem;
+    private boolean isPaused;
     private final int MAX_PRIORITY;
     private final int MIN_PRIORITY;
     private boolean preventSubmit;
 
-    public ThreadPool(int numOfThreads) {
-        if (numOfThreads <= 0) {
-            throw new IllegalArgumentException();
-        }
+    public ThreadPool() {
+        this(Runtime.getRuntime().availableProcessors());
+    }
 
-        this.atomicNumOfThreads = new AtomicInteger(0);
+    public ThreadPool(int numOfThreads) {
+        this.currNumOfThreads = new AtomicInteger(0);
         this.tasks = new SemWaitableQueue<>(numOfThreads);
         this.pauseSem = new Semaphore(0);
         this.MAX_PRIORITY = Priority.HIGH.getValue() + 1;
         this.MIN_PRIORITY = Priority.LOW.getValue() - 1;
+        this.isPaused = false;
+        this.targetNumOfThreads = numOfThreads;
 
         for (int i = 0; i < numOfThreads; ++i) {
             WorkingThread thread = new WorkingThread();
@@ -33,12 +36,10 @@ public class ThreadPool implements Executor {
     }
 
     public <V> Future<V> submit(Callable<V> command, Priority priority) {
-
         return submit(command, priority.getValue());
     }
 
     public <V> Future<V> submit(Callable<V> command) {
-
         return submit(command, Priority.DEFAULT.getValue());
     }
 
@@ -50,7 +51,6 @@ public class ThreadPool implements Executor {
 
     public <V> Future<V> submit(Runnable command, Priority priority,
                                 V returnValue) {
-
         Callable<V> callable = runnableToCallable(command, returnValue);
 
         return submit(callable, priority.getValue());
@@ -66,10 +66,10 @@ public class ThreadPool implements Executor {
         return newTask.getFuture();
     }
 
-    private <V> Callable<V> runnableToCallable(Runnable taskToConvert,
+    private <V> Callable<V> runnableToCallable(Runnable runnableToWrap,
                                                V result) {
         return () -> {
-            taskToConvert.run();
+            runnableToWrap.run();
             return result;
         };
     }
@@ -80,11 +80,16 @@ public class ThreadPool implements Executor {
     }
 
     public void setNumOfThreads(int numOfThreads) {
-
-        int diff = numOfThreads - this.atomicNumOfThreads.get();
+        int diff = numOfThreads - targetNumOfThreads;
 
         if (diff > 0) {
             //add new threads
+            if (isPaused) {
+                //if ThreadPool is paused, add pause tasks so the new threads
+                // won't start running tasks
+                addPauseTasks(diff);
+            }
+
             for (int i = 0; i < diff; ++i) {
                 WorkingThread thread = new WorkingThread();
                 thread.start();
@@ -106,6 +111,8 @@ public class ThreadPool implements Executor {
                 tasks.enqueue(stopThreadTask);
             }
         }
+
+        targetNumOfThreads = numOfThreads;
     }
 
     public void pause() {
@@ -113,6 +120,17 @@ public class ThreadPool implements Executor {
         //the number of instances of the task to add to the queue is equal to
         // the number of threads
 
+        isPaused = true;
+
+        //drain permits (set semaphore to 0), in case user called resume
+        // before pause, causing the semapahore value to be increased
+        // unnecessarily
+        pauseSem.drainPermits();
+
+        addPauseTasks(currNumOfThreads.get());
+    }
+
+    private void addPauseTasks(int amount) {
         Callable<Void> pauseCommand = () -> {
             pauseSem.acquire();
 
@@ -121,14 +139,13 @@ public class ThreadPool implements Executor {
 
         Task<Void> pauseTask = new Task<>(pauseCommand, MAX_PRIORITY);
 
-        int numOfThreads = atomicNumOfThreads.get();
-        for (int i = 0; i < numOfThreads; ++i) {
+        for (int i = 0; i < amount; ++i) {
             tasks.enqueue(pauseTask);
         }
     }
 
     public void resume() {
-        pauseSem.release(atomicNumOfThreads.get());
+        pauseSem.release(currNumOfThreads.get());
     }
 
     public void shutDown() {
@@ -142,8 +159,7 @@ public class ThreadPool implements Executor {
 
         Task<Void> shutDownTask = new Task<>(stopThreadCommand, MIN_PRIORITY);
 
-        int numOfThreads = atomicNumOfThreads.get();
-        for (int i = 0; i < numOfThreads; ++i) {
+        for (int i = 0; i < targetNumOfThreads; ++i) {
             tasks.enqueue(shutDownTask);
         }
     }
@@ -154,7 +170,7 @@ public class ThreadPool implements Executor {
                 System.currentTimeMillis() + unit.toMillis(timeout);
 
 
-        while (atomicNumOfThreads.get() > 0 && currTime < maxTimeToWait) {
+        while (currNumOfThreads.get() > 0 && currTime < maxTimeToWait) {
             try {
                 Thread.sleep(50);
             } catch (InterruptedException e) {
@@ -164,13 +180,13 @@ public class ThreadPool implements Executor {
             currTime = System.currentTimeMillis();
         }
 
-        if (atomicNumOfThreads.get() > 0) {
+        if (currNumOfThreads.get() > 0) {
             throw new TimeoutException();
         }
     }
 
     public void awaitTermination() {
-        while (atomicNumOfThreads.get() > 0) {
+        while (currNumOfThreads.get() > 0) {
             try {
                 Thread.sleep(50);
             } catch (InterruptedException e) {
@@ -187,21 +203,18 @@ public class ThreadPool implements Executor {
 
         @Override
         public void run() {
-            atomicNumOfThreads.incrementAndGet();
+            currNumOfThreads.incrementAndGet();
             while (!stopThread) {
+                Task<?> task = tasks.dequeue();
                 try {
-                    tasks.dequeue().execute();
-                } catch (InterruptedException e) {
-                    //reset isInterrupted flag
+                    task.execute();
+                }catch (Exception e) {
                     Thread.interrupted();
-                } catch (Exception e) {
-                    atomicNumOfThreads.decrementAndGet();
-                    throw new RuntimeException("Exception in working thread. " +
-                            "Closing thread.", e);
+                    currNumOfThreads.decrementAndGet();
                 }
             }
 
-            atomicNumOfThreads.decrementAndGet();
+            currNumOfThreads.decrementAndGet();
         }
     }
 
@@ -216,8 +229,12 @@ public class ThreadPool implements Executor {
             this.future = new TaskFuture<>(callable, this);
         }
 
-        public void execute() throws Exception {
-            future.run();
+        public void execute() {
+            try {
+                future.run();
+            } catch (Exception e) {
+                future.executionException = new ExecutionException(e);
+            }
         }
 
         public TaskFuture<V> getFuture() {
