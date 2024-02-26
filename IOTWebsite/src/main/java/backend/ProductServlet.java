@@ -17,7 +17,6 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.json.JSONObject;
 
-@SuppressWarnings("serial")
 @WebServlet("/products")
 public class ProductServlet extends HttpServlet{
 
@@ -33,7 +32,6 @@ public class ProductServlet extends HttpServlet{
 			throw new ServletException("could not load sqlCrud from context");
 		}
 	}
-
 
 	@Override
 	protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException{

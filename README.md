@@ -25,4 +25,12 @@ The Gateway server is the backbone of the IoT infrastructure, providing the nece
 * IoT Device Registration: Devices belonging to registered products can be registered by sending a request to the Gateway server.
 * Data Update: Registered devices can start sending data updates to the Gateway server, which serves as the intermediary for interaction with the company-specific database. The server stores the information in the respective company's NoSQL database.
 
+## Usage
+* Clone the project
+```bash
+git clone https://github.com/YonathanZzZ/GenericIoTInfrastructure.git
+```
 
+* Start a TomCat server and load the website (backend) server into it
+* Start the Gateway server
+* You can now use the website and send requests to the Gateway server
