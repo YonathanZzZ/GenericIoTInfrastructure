@@ -4,12 +4,6 @@ import java.util.Comparator;
 import java.util.PriorityQueue;
 import java.util.concurrent.Semaphore;
 
-//pseudocode: use semaphore to prevent threads from trying to read from an
-// empty queue. init semaphore to 0. when a thread adds an item into the
-// queue, increment the semaphore value (release()). when a thread reads an
-// item from the queue (dequeue), decrement the semaphore value (wait()).
-// also use synchronized blocks to prevent concurrent modification
-
 public class SemWaitableQueue<E> {
     private final Semaphore itemsInQueueSemaphore;
     private final PriorityQueue<E> queue;
