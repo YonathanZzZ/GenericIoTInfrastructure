@@ -71,9 +71,7 @@ public class CompanyServlet extends HttpServlet{
 			GatewayRequest.sendRequestToGateway("RegisterCompany", requestData);
 		}catch (Exception e) {
 			sendResponse(response, "Failed to register company due to internal error. Please try again later.");
-			
-			//TODO company was already registered in adminDB. remove it 
-			
+
 			return;
 		}
 
@@ -89,7 +87,6 @@ public class CompanyServlet extends HttpServlet{
 		try {
 			response.getWriter().write(jsonObject.toString());
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 	}

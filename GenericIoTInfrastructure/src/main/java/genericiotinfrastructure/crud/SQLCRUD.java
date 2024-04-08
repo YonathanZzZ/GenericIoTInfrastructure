@@ -147,7 +147,7 @@ public class SQLCRUD {
                 throw new RuntimeException(e);
             }
 
-            return null; //TODO fix return value
+            return null;
         }
 
         private void addPaymentInfo(Connection connection,
@@ -205,7 +205,7 @@ public class SQLCRUD {
                 throw new RuntimeException(e);
             }
 
-            return null; //TODO fix return value
+            return null;
         }
 
         private void addProductToAdminDB(Connection connection,

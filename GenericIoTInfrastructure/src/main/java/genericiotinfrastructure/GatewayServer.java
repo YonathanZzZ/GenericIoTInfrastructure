@@ -1,12 +1,14 @@
 package genericiotinfrastructure;
 
 import com.sun.media.sound.InvalidDataException;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
 import genericiotinfrastructure.crud.MongoCRUD;
 import org.json.JSONObject;
 import threadpool.ThreadPool;
 
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
@@ -23,64 +25,52 @@ import static java.nio.file.StandardWatchEventKinds.ENTRY_CREATE;
 
 
 public class GatewayServer {
-    private final MultiProtocolServer multiProtocolServer;
+    private final ConnectionManager connectionManager;
     private final RequestHandler requestHandler;
-    //private final PlugAndPlay plugAndPlay;
+    private final PlugAndPlay plugAndPlay;
     private final MongoCRUD mongoCRUD;
+    private final String plugAndPlayFolderPath;
 
-    public GatewayServer() {
-        this.multiProtocolServer = new MultiProtocolServer();
+    public GatewayServer(String plugAndPlayFolderPath) {
+        this.connectionManager = new ConnectionManager();
         this.requestHandler = new RequestHandler();
-//        this.plugAndPlay = new PlugAndPlay("/home/yonathan/Downloads" +
-//                "/folderToTrack");
-
+        this.plugAndPlayFolderPath = plugAndPlayFolderPath;
+        this.plugAndPlay = new PlugAndPlay(plugAndPlayFolderPath);
         this.mongoCRUD = new MongoCRUD();
     }
 
-    private static String convertBytesToString(ByteBuffer buffer) {
-        // Create a new ByteBuffer to store the copied bytes.
-        ByteBuffer copy = buffer.duplicate();
-
-        // Create a byte array to store the copied bytes.
-        byte[] bytes = new byte[copy.remaining()];
-
-        // Copy the bytes from the copy buffer to the byte array.
-        copy.get(bytes);
-        // Convert the byte array to a String using the UTF-8 encoding.
-        return new String(bytes);
+    public void start() {
+        connectionManager.start();
+        if(plugAndPlayFolderPath != null){
+            new Thread(plugAndPlay).start();
+        }
     }
 
-
-    public void start() throws IOException, ClassNotFoundException {
-
-        multiProtocolServer.start();
-        //new Thread(plugAndPlay).start();
-
-    }
-
-    public void stop() {
-        //plugAndPlay.stop();
-        multiProtocolServer.stop();
+    public void stop(int maxWaitingTimeForServerStop) {
+        plugAndPlay.stop();
+        connectionManager.stop(maxWaitingTimeForServerStop);
     }
 
     public void addTCPConnection(int port) throws IOException {
-        multiProtocolServer.addTCPConnection(port);
+        connectionManager.addTCPConnection(port);
     }
 
     public void addUDPConnection(int port) throws IOException {
-        multiProtocolServer.addUDPConnection(port);
+        connectionManager.addUDPConnection(port);
+    }
+
+    public void addHTTPConnection(int port) throws IOException {
+        connectionManager.addHTTPConnection(port);
     }
 
     private void handle(ByteBuffer buffer, Communicator communicator) {
-        //buffer is the message that was received from the client.
         requestHandler.handle(buffer, communicator);
     }
 
-    //package private for testing only! should be private.
     private interface Communicator {
-        ByteBuffer receive();
+        ByteBuffer receive() throws IOException;
 
-        void send(ByteBuffer buffer);
+        void send(int statusCode, JSONObject body) throws IOException;
 
     }
 
@@ -237,10 +227,6 @@ public class GatewayServer {
             factory.add("Update", SendUpdateCommand::new);
         }
 
-        private String[] getSubstrings(String str) {
-            return str.split("\\$");
-        }
-
         private void handle(ByteBuffer buffer, Communicator communicator) {
             //create task (runnable). the task calls the parser. the parser
             // creates a key-value pair. the key is the text before the @.
@@ -258,14 +244,8 @@ public class GatewayServer {
                 return;
             }
 
-            Runnable task = createRunnable(buffer, communicator);
+            Runnable task = Task(buffer, communicator);
             threadPool.submit(task, ThreadPool.Priority.DEFAULT);
-        }
-
-        private String byteBufferToString(ByteBuffer buffer) {
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-            return new String(bytes, StandardCharsets.UTF_8);
         }
 
         private JSONObject byteBufferToJSONObject(ByteBuffer buffer) {
@@ -275,13 +255,6 @@ public class GatewayServer {
             String jsonString = new String(byteArray, StandardCharsets.UTF_8);
             System.out.println("jsonString: " + jsonString);
             return new JSONObject(jsonString);
-        }
-
-        private ByteBuffer JSONObjectToByteBuffer(JSONObject jsonObject) {
-            String jsonString = jsonObject.toString();
-            byte[] bytes = jsonString.getBytes(StandardCharsets.UTF_8);
-
-            return ByteBuffer.wrap(bytes);
         }
 
         private Entry<String, JSONObject> parse(JSONObject request) throws InvalidDataException {
@@ -350,46 +323,40 @@ public class GatewayServer {
             */
         }
 
-        private Runnable createRunnable(ByteBuffer buffer,
-                                        Communicator communicator) {
+        private Runnable Task(ByteBuffer buffer,
+                              Communicator communicator) {
 
-            return new Runnable() {
-                @Override
-                public void run() {
-                    //create JSONObject from buffer
-                    JSONObject userRequest = byteBufferToJSONObject(buffer);
-                    String response = null;
+            return () -> {
+                JSONObject userRequest = byteBufferToJSONObject(buffer);
+                System.out.println("userRequest in Task: " + userRequest);
+                String message = null;
+                int status = 200;
 
+                try {
+                    Entry<String, JSONObject> entry = parse(userRequest);
+
+                    Command command = factory.create(entry.getKey(),
+                            entry.getValue());
+
+                    command.exec(mongoCRUD);
+
+                } catch (InvalidDataException e) {
+                    status = 400;
+                    message = e.getMessage();
+
+                } finally {
+
+                    JSONObject responseBody = new JSONObject();
+                    responseBody.put("message", message);
                     try {
-                        //create entry using parser
-                        Entry<String, JSONObject> entry = parse(userRequest);
-
-                        // get command to run
-                        Command command = factory.create(entry.getKey(),
-                                entry.getValue());
-
-                        // execute command
-                        command.exec(mongoCRUD);
-
-                        //add status code 200 to user request
-                        userRequest.put("status", 200);
-
-                    } catch (InvalidDataException e) {
-                        //add status code 400 (bad request) to request, and a
-                        // field to indicate the cause
-                        userRequest.put("status", 400);
-                        userRequest.put("cause", e.getMessage());
-
-                    } finally {
-
-                        // send response to client via Communicator
-                        ByteBuffer responseBuffer =
-                                JSONObjectToByteBuffer(userRequest);
-
-
-                        communicator.send(responseBuffer);
-                        System.out.println("data sent from gateway: " + responseBuffer);
+                        communicator.send(status, responseBody);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
                     }
+
+                    System.out.println("data sent from gateway:");
+                    System.out.println("status: " + status);
+                    System.out.println("body (response): " + message);
                 }
             };
         }
@@ -422,11 +389,11 @@ public class GatewayServer {
 
     // ---------------------------------------------------------------------- //
 
-    private class MultiProtocolServer {
+    private class ConnectionManager {
         private final CommunicationManager communicationManger;
         private final MessageManager messageManager;
 
-        public MultiProtocolServer() {
+        public ConnectionManager() {
             this.communicationManger = new CommunicationManager();
             messageManager = new MessageManager();
         }
@@ -439,8 +406,12 @@ public class GatewayServer {
             this.communicationManger.addUDPConnection(clientPort);
         }
 
-        public void stop() {
-            this.communicationManger.stop();
+        public void addHTTPConnection(int clientPort) throws IOException {
+            this.communicationManger.addHTTPConnection(clientPort);
+        }
+
+        public void stop(int maxWaitingTimeForServerStop) {
+            this.communicationManger.stop(maxWaitingTimeForServerStop);
         }
 
 
@@ -453,7 +424,7 @@ public class GatewayServer {
 
         private class MessageManager {
 
-            public void handle(ByteBuffer receivedMessage, Communicator communicator) throws IOException, ClassNotFoundException {
+            public void handle(ByteBuffer receivedMessage, Communicator communicator) throws IOException {
 
                 //ByteBuffer byteBuffer = communicator.receive();
                 if (receivedMessage != null && receivedMessage.hasRemaining()) {
@@ -463,15 +434,12 @@ public class GatewayServer {
             }
         }
 
-        /*=========================================================================================================*/
-        /*===================================== Communication Manager =============================================*/
-
         private class CommunicationManager {
 
             private final Selector selector;
             private boolean isRunning;
             private final SelectorRunner selectorRunner;
-
+            private HTTPServer httpServer;
 
             public CommunicationManager() {
                 try {
@@ -497,12 +465,64 @@ public class GatewayServer {
                 udpServerSocket.register(selector, SelectionKey.OP_READ);
             }
 
-            public void start() {
-                new Thread(this.selectorRunner).start();
+            public void addHTTPConnection(int httpPort) throws IOException {
+                this.httpServer = new HTTPServer(httpPort);
             }
 
-            public void stop() {
+            public void start() {
+                this.isRunning = true;
+                new Thread(this.selectorRunner).start();
+                this.httpServer.start();
+            }
+
+            public void stop(int maxWaitTimeForServerStop) {
                 this.isRunning = false;
+                this.httpServer.stop(maxWaitTimeForServerStop);
+            }
+
+            private ByteBuffer createByteBuffer(int statusCode, JSONObject body) {
+                String responseJson = String.format("{\"status\": %d, \"body\": %s}", statusCode, body.toString());
+                return ByteBuffer.wrap(responseJson.getBytes());
+            }
+
+            private class HTTPServer{
+                private final HttpServer server;
+                private final int port;
+
+                public HTTPServer(int port) throws IOException {
+                    this.port = port;
+                    this.server = HttpServer.create(new InetSocketAddress(port), 0);
+                    server.createContext("/requests", new Handler());
+                    server.setExecutor(null);
+                }
+
+                public void start(){
+                    server.start();
+                    System.out.println("HTTP Server listening on port " + this.port);
+                }
+
+                public void stop(int maxWaitTimeForServerStop){
+                    server.stop(maxWaitTimeForServerStop);
+                }
+
+                private class Handler implements HttpHandler{
+                    @Override
+                    public void handle(HttpExchange exchange) throws IOException {
+                        String requestMethod = exchange.getRequestMethod();
+                        if(!requestMethod.equals("POST")){
+                            exchange.sendResponseHeaders(405, 0);
+                            exchange.close();
+                        }else{
+                            handlePostRequest(exchange);
+                        }
+                    }
+
+                    private void handlePostRequest(HttpExchange exchange) throws IOException {
+
+                        HTTPCommunicator communicator = new HTTPCommunicator(exchange);
+                        messageManager.handle(communicator.receive(), communicator);
+                    }
+                }
             }
 
             /*========================================================================================================*/
@@ -542,20 +562,20 @@ public class GatewayServer {
                                         if (receivedMessage == null) {
                                             key.cancel();
                                         } else {
-                                            MultiProtocolServer.this.messageManager.handle(receivedMessage, tcpCommunicator);
+                                            ConnectionManager.this.messageManager.handle(receivedMessage, tcpCommunicator);
                                         }
                                     } else { // UDP
                                         DatagramChannel datagramChannel = (DatagramChannel) channel;
                                         //datagramChannel.disconnect();
                                         UDPCommunicator udpCommunicator = new UDPCommunicator(datagramChannel);
                                         ByteBuffer receivedMessage = udpCommunicator.receive();
-                                        MultiProtocolServer.this.messageManager.handle(receivedMessage, udpCommunicator);
+                                        ConnectionManager.this.messageManager.handle(receivedMessage, udpCommunicator);
 
                                     }
                                 }
                                 iterator.remove();
                             }
-                        } catch (IOException | ClassNotFoundException e) {
+                        } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
 
@@ -612,21 +632,16 @@ public class GatewayServer {
                 }
 
                 @Override
-                public void send(ByteBuffer buffer) {
+                public void send(int statusCode, JSONObject body) {
                     try {
                         if (!clientSocketChannel.isOpen() || !clientSocketChannel.isConnected()) {
                             return;
                         }
-                        buffer.limit(buffer.array().length);
 
-                        /* String content = new String(buffer.array(), Charset.defaultCharset());
-                        Entry<String,String> entry = GatewayServer.this.requestHandler.parse(content);
-                        assert entry != null;
-                        Message<String,String> message = new MessageImpl(entry.getKey(), entry.getValue());
-                        buffer = serialize(message);*/
+                        ByteBuffer responseBuffer = createByteBuffer(statusCode, body);
 
-                        while (buffer.hasRemaining()) {
-                            clientSocketChannel.write(buffer);
+                        while (responseBuffer.hasRemaining()) {
+                            clientSocketChannel.write(responseBuffer);
                         }
                     } catch (IOException e) {
                         throw new RuntimeException(e);
@@ -637,7 +652,7 @@ public class GatewayServer {
             private class UDPCommunicator implements Communicator {
 
                 private final DatagramChannel clientDatagramChannel;
-                private SocketAddress clientAddress; //?
+                private SocketAddress clientAddress;
 
                 public UDPCommunicator(DatagramChannel clientDatagramChannel) {
                     this.clientDatagramChannel = clientDatagramChannel;
@@ -656,20 +671,55 @@ public class GatewayServer {
                 }
 
                 @Override
-                public void send(ByteBuffer buffer) {
+                public void send(int statusCode, JSONObject body) {
                     try {
-                        /*buffer.limit(buffer.array().length);
-                        String content = new String(buffer.array(), Charset.defaultCharset());
-                        Entry<String,String> entry = GatewayServer.this.requestHandler.parse(content);
-                        assert entry != null;
-                        Message<String,String> message = new MessageImpl(entry.getKey(), entry.getValue());
-                        buffer = serialize(message);*/
+                        ByteBuffer responseBuffer = createByteBuffer(statusCode, body);
 
-                        this.clientDatagramChannel.send(buffer, clientAddress);
-                        buffer.flip();
+                        this.clientDatagramChannel.send(responseBuffer, clientAddress);
+                        responseBuffer.flip();
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
+                }
+            }
+
+            private class HTTPCommunicator implements Communicator {
+                private final HttpExchange exchange;
+
+                public HTTPCommunicator(HttpExchange exchange) {
+                    this.exchange = exchange;
+                }
+
+                @Override
+                public ByteBuffer receive() throws IOException {
+                    InputStream inputStream = exchange.getRequestBody();
+
+                    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[1024];
+                    int bytesRead;
+                    while ((bytesRead = inputStream.read(buffer)) != -1) {
+                        byteArrayOutputStream.write(buffer, 0, bytesRead);
+                    }
+
+                    byte[] requestBodyBytes = byteArrayOutputStream.toByteArray();
+                    ByteBuffer byteBuffer = ByteBuffer.wrap(requestBodyBytes);
+
+                    byteArrayOutputStream.close();
+                    inputStream.close();
+
+                    return byteBuffer;
+                }
+
+                @Override
+                public void send(int statusCode, JSONObject body) throws IOException {
+                    byte[] responseBodyBytes = body.toString().getBytes();
+
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(statusCode, responseBodyBytes.length);
+
+                    OutputStream outputStream = exchange.getResponseBody();
+                    outputStream.write(responseBodyBytes);
+                    outputStream.close();
                 }
             }
         }
@@ -713,8 +763,6 @@ public class GatewayServer {
                         // create Callable from the Class object
                         Callable<String> callable =
                                 (Callable<String>) callableClass.newInstance();
-                        //TODO what if we add a JAR that includes a Callable
-                        // that doesn't return a String?
 
                         // create Command from the Callable
                         CallableCommand callableCommand =
@@ -724,7 +772,6 @@ public class GatewayServer {
                         // create a Function from the Command
                         Function<JSONObject, Command> func = string -> {
 
-                            //TODO how to send the String to the callable?
                             return callableCommand;
                         };
 
@@ -804,14 +851,10 @@ public class GatewayServer {
                             continue;
                         }
 
-                        //get name of newly created file
                         Path foundFile = (Path) event.context();
                         Path fullPath = watchableDir.resolve(foundFile);
 
-                        //return path of new file as String
                         return fullPath.toString();
-
-                        //key.reset();
                     }
                 }
             }
@@ -833,9 +876,7 @@ public class GatewayServer {
                     throw new RuntimeException(e);
                 }
 
-                //open jar file
                 try (JarFile jarFile = new JarFile(file)) {
-                    //traverse entries of the file
                     for (Enumeration<JarEntry> entries = jarFile.entries();
                          entries.hasMoreElements(); ) {
                         JarEntry entry = entries.nextElement();
@@ -847,11 +888,8 @@ public class GatewayServer {
                                             .substring(0, entry.getName().length() - 6);
 
                             Class<?> loadedClass = classLoader.loadClass(className);
-                            //check if class implements the specified interface
                             for (Class<?> anInterface : loadedClass.getInterfaces()) {
                                 if (anInterface.getName().equals(interfaceName)) {
-                                    //found class that implements the interface
-                                    //add class to list
                                     implementingClasses.add(loadedClass);
 
                                     break;
@@ -869,10 +907,11 @@ public class GatewayServer {
         }
     }
 
-    public static void main(String[] args) throws IOException, ClassNotFoundException {
-        GatewayServer server = new GatewayServer();
+    public static void main(String[] args) throws IOException {
+        GatewayServer server = new GatewayServer(null);
 
         server.addTCPConnection(8090);
+        server.addHTTPConnection(9090);
         server.start();
     }
 }

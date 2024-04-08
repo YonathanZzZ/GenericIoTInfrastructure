@@ -71,10 +71,6 @@ public class DBManager {
                 ");";
 
         statement.execute(query);
-        //TODO if table already exists with constraints, i get an error.
-        // check if the foreign key can be included in the table creation
-        // query instead. this applies to both ALTER TABLE statements that
-        // follow.
 
         query = "ALTER TABLE\n" +
                 "    Products ADD CONSTRAINT products_company_id_foreign " +

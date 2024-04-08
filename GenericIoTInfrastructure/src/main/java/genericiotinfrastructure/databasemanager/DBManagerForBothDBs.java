@@ -68,10 +68,6 @@ public class DBManagerForBothDBs {
                 ");";
 
         statement.execute(query);
-        //TODO if table already exists with constraints, i get an error.
-        // check if the foreign key can be included in the table creation
-        // query instead. this applies to both ALTER TABLE statements that
-        // follow.
 
         query = "ALTER TABLE" +
                 "    Products ADD CONSTRAINT products_company_id_foreign " +
@@ -406,7 +402,7 @@ public class DBManagerForBothDBs {
         // string, timestamp, int, int
         statement = connection.prepareStatement(query);
         statement.setString(1, deviceDetails.getMacAddress());
-        statement.setString(2, "NOW"); //TODO use set TimeStamp?
+        statement.setString(2, "NOW");
         statement.setInt(3, productID);
         statement.setLong(4, deviceDetails.getIPAddress());
 
