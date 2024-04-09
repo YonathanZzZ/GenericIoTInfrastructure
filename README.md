@@ -30,16 +30,17 @@ The following diagram illustrates the aforementioned usage flow:
 ![iot_drawio drawio](https://github.com/YonathanZzZ/GenericIoTInfrastructure/assets/101878675/0016bd4b-4269-43d1-8040-9b1af30078ab)
 
 
-## Dependencies
+## Requirements
 * JRE 8 or later
 * Tomcat 9 or later
+* MySQL server
 
 ## Usage
 * Clone the project
 ```bash
 git clone https://github.com/YonathanZzZ/GenericIoTInfrastructure.git
 ```
-
-* Start a TomCat server and load the website (backend) server into it
+* Start the MySQL server and create a database  
+* Start a TomCat server with environment variables for the MySQL Server, and load the website's server into it. The environment variables are: DB_NAME, DB_URL, DB_USER, DB_PASSWORD, 
 * Start the Gateway server
-* You can now use the website and send requests to the Gateway server
+* You can now use the website to register companies or products, as well as send requests directly to the Gateway server
