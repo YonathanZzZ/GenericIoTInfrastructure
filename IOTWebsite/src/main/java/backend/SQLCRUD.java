@@ -38,12 +38,10 @@ public class SQLCRUD {
         this.registerCompanyCRUD = new RegisterCompanyCRUDImpl();
         this.registerProductCRUD = new RegisterProductCRUDImpl();
 
-        //create AdminDB
         createAdminDB();
     }
 
     private void createAdminDBTables(Statement statement) throws SQLException {
-
 
         statement.execute("USE " + dbName);
 
@@ -112,7 +110,7 @@ public class SQLCRUD {
     }
     
     public boolean isProductRegistered(String companyName, String productName) {
-    	Boolean isRegistered = false;
+    	boolean isRegistered = false;
     	   
     	try (Connection connection = DriverManager.getConnection(URL, user, password);
         		PreparedStatement preparedStatement = connection.prepareStatement("SELECT 1 FROM Products WHERE company_name = ? AND product_name = ?");
@@ -139,7 +137,7 @@ public class SQLCRUD {
     }
     
     public boolean isCompanyRegistered(String companyName) {
-    	Boolean isRegistered = false;
+    	boolean isRegistered = false;
    
     	try (Connection connection = DriverManager.getConnection(URL, user, password);
         		PreparedStatement preparedStatement = connection.prepareStatement("SELECT 1 FROM Companies WHERE company_name = ?");
